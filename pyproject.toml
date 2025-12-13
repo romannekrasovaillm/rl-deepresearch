@@ -1,0 +1,110 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rl-deepresearch"
+version = "0.1.0"
+description = "RL-based Deep Research Agent with GRPO training on GigaChat-Lightning"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Research Team"}
+]
+keywords = ["reinforcement-learning", "llm", "research-agent", "grpo"]
+
+dependencies = [
+    # Core ML
+    "torch>=2.2.0",
+    "transformers>=4.40.0",
+    "accelerate>=0.28.0",
+    "peft>=0.10.0",  # LoRA
+    "bitsandbytes>=0.43.0",
+
+    # RL specific
+    "trl>=0.8.0",  # Transformer RL
+
+    # Distributed training
+    "deepspeed>=0.14.0",
+
+    # Data & Utils
+    "datasets>=2.18.0",
+    "numpy>=1.26.0",
+    "pandas>=2.2.0",
+    "scipy>=1.12.0",
+
+    # API clients
+    "httpx>=0.27.0",
+    "aiohttp>=3.9.0",
+
+    # Experiment tracking
+    "wandb>=0.16.0",
+    "tensorboard>=2.16.0",
+
+    # Search & Retrieval
+    "faiss-cpu>=1.8.0",
+    "sentence-transformers>=2.6.0",
+    "rank-bm25>=0.2.2",
+
+    # Parsing & Processing
+    "beautifulsoup4>=4.12.0",
+    "lxml>=5.1.0",
+    "trafilatura>=1.8.0",
+
+    # Config & CLI
+    "pydantic>=2.6.0",
+    "pydantic-settings>=2.2.0",
+    "typer>=0.12.0",
+    "rich>=13.7.0",
+    "omegaconf>=2.3.0",
+
+    # Async
+    "anyio>=4.3.0",
+
+    # Evaluation
+    "rouge-score>=0.1.2",
+    "nltk>=3.8.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "black>=24.2.0",
+    "ruff>=0.3.0",
+    "mypy>=1.8.0",
+    "pre-commit>=3.6.0",
+]
+flash-attn = [
+    "flash-attn>=2.5.0",
+]
+
+[project.scripts]
+rl-research = "rl_deepresearch.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

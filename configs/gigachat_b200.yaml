@@ -1,0 +1,159 @@
+# Configuration for GigaChat-Lightning training on NVIDIA B200
+# Optimized for maximum throughput with RL training
+
+experiment_name: "gigachat-grpo-research-b200"
+seed: 42
+debug: false
+
+# Model configuration - B200 optimized
+model:
+  model_name: "ai-forever/gigachat-lightning"
+  dtype: "bf16"  # BF16 optimal for B200
+
+  # LoRA for efficient fine-tuning
+  use_lora: true
+  lora_r: 64
+  lora_alpha: 128
+  lora_dropout: 0.05
+  lora_target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    - "gate_proj"
+    - "up_proj"
+    - "down_proj"
+
+  # Context and attention
+  max_context_length: 32768
+  use_flash_attention: true
+  use_yarn: true
+  yarn_scale: 4.0
+
+  # Generation
+  max_new_tokens: 2048
+  temperature: 0.7
+  top_p: 0.9
+
+# GRPO algorithm configuration
+grpo:
+  group_size: 8  # Trajectories per question (needs variance)
+  min_group_variance: 0.01
+
+  # Optimization
+  learning_rate: 1.0e-5
+  kl_coef: 0.05  # KL penalty for stability
+  clip_ratio: 0.2
+  entropy_coef: 0.01
+
+  # Credit assignment
+  use_turn_level_advantage: true
+  immediate_reward_weight: 0.3
+  mask_tool_outputs: true  # Don't learn to predict tool outputs
+
+  # Stability
+  max_grad_norm: 1.0
+  warmup_steps: 100
+  weight_decay: 0.01
+
+# Reward configuration
+reward:
+  # Terminal rewards
+  correct_answer: 2.0
+  correct_efficient_bonus: 0.5
+  partial_correct_base: 0.5
+  wrong_answer: -1.0
+  dont_know_reward: 0.3  # Better than wrong (epistemic calibration)
+
+  # Format penalties (worse than wrong answer)
+  format_error: -2.0
+  bad_tool_name: -1.5
+  bad_tool_args: -1.0
+
+  # Progress rewards (bootstrap mechanism)
+  found_relevant_doc: 0.3
+  read_useful_content: 0.2
+  information_gain: 0.1
+
+  # Efficiency (anti-over-search)
+  redundant_search_penalty: -0.1
+  excessive_turns_penalty: -0.05
+  efficient_search_threshold: 3
+  max_turns_before_penalty: 6
+
+  # Soft matching
+  use_word_f1: true
+  citation_correct_bonus: 0.2
+  citation_wrong_penalty: -0.3
+
+# Environment configuration
+environment:
+  max_turns: 10  # Exploration budget (too low kills learning)
+  min_turns_for_training: 4
+
+  available_tools:
+    - "keyword_search"
+    - "semantic_search"
+    - "read_document"
+    - "read_section"
+    - "answer"
+    - "dont_know"
+
+  max_search_results: 10
+  max_read_tokens: 4096
+  compress_history: true
+  max_history_tokens: 8192
+  use_hierarchical_ids: true
+
+# Data configuration
+data:
+  train_dataset: "hotpotqa"
+  batch_size: 4
+  effective_batch_size: 32  # With GRPO groups
+
+  # Filtering
+  min_difficulty: 0.3
+  max_difficulty: 0.95
+  require_multi_hop: true
+  decontaminate: true
+  decontamination_threshold: 0.8
+
+  # DUPO-style duplication
+  duplicate_informative_samples: true
+  max_duplicates: 3
+
+# Training configuration - B200 optimized
+training:
+  num_epochs: 3
+  max_steps: 10000
+  eval_steps: 500
+  save_steps: 1000
+
+  # B200 optimization
+  gradient_accumulation_steps: 4
+  gradient_checkpointing: true
+
+  # DeepSpeed ZeRO-2 for B200
+  use_deepspeed: true
+  deepspeed_stage: 2
+
+  # Distributed (single B200)
+  num_gpus: 1
+
+  # Async rollouts
+  async_rollouts: true
+  num_rollout_workers: 4
+  max_rollout_staleness: 3
+
+  # Curriculum
+  use_curriculum: true
+  curriculum_stages: 3
+
+  # Output
+  output_dir: "./outputs/gigachat-grpo"
+  checkpoint_dir: "./checkpoints/gigachat-grpo"
+
+  # Logging
+  log_level: "INFO"
+  use_wandb: true
+  wandb_project: "rl-deepresearch"
