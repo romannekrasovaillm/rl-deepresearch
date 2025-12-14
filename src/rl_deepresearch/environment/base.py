@@ -195,6 +195,20 @@ class ResearchEnvironment:
         tool_name = parsed_action.get("name", "")
         tool_args = parsed_action.get("arguments", {})
 
+        # Handle case where arguments is a string instead of dict
+        if isinstance(tool_args, str):
+            # Convert string argument to proper dict format
+            if tool_name == "dont_know":
+                tool_args = {"reason": tool_args}
+            elif tool_name == "answer":
+                tool_args = {"answer": tool_args}
+            else:
+                tool_args = {"query": tool_args}
+
+        # Ensure tool_args is a dict
+        if not isinstance(tool_args, dict):
+            tool_args = {}
+
         # Execute tool
         result = self.tools.execute(tool_name, **tool_args)
 
