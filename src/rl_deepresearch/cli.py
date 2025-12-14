@@ -107,9 +107,8 @@ def train(
     from .rewards.compute import RewardComputer
     from .training.grpo import GRPOTrainer
     from .training.data import ResearchDataset, create_dataloader
-    from .training.callbacks import (
-        LoggingCallback, CheckpointCallback, WandbCallback
-    )
+    from .training.callbacks import CheckpointCallback
+    from .training.logging import create_rl_logging_stack
 
     console.print("[bold blue]RL Deep Research Training[/bold blue]")
 
@@ -189,20 +188,23 @@ def train(
         environment=environment,
     )
 
-    # Setup callbacks
-    callbacks = [
-        LoggingCallback(log_every=10),
+    # Setup callbacks with comprehensive RL logging
+    log_dir = output_path / "logs"
+    tracker, rl_callbacks = create_rl_logging_stack(
+        log_dir=log_dir,
+        use_wandb=use_wandb,
+        wandb_project=wandb_project if use_wandb else None,
+        wandb_config=config.model_dump() if use_wandb else None,
+    )
+
+    callbacks = rl_callbacks + [
         CheckpointCallback(
             save_dir=output_path / "checkpoints",
             save_every=500,
         ),
     ]
 
-    if use_wandb:
-        callbacks.append(WandbCallback(
-            project=wandb_project,
-            config=config.model_dump(),
-        ))
+    console.print(f"[yellow]RL logging enabled → {log_dir}[/yellow]")
 
     # Train
     console.print("\n[bold green]Starting training...[/bold green]")
@@ -225,6 +227,19 @@ def train(
             table.add_row(k, str(v))
 
     console.print(table)
+
+    # Print training health summary
+    health = tracker.get_health_score()
+    health_color = "green" if health > 0.8 else "yellow" if health > 0.5 else "red"
+    console.print(f"\n[bold]Training Health Score: [{health_color}]{health:.2f}[/{health_color}][/bold]")
+
+    # Print any alerts
+    alerts = tracker.get_recent_alerts(limit=10)
+    if alerts:
+        console.print("\n[bold yellow]Training Alerts:[/bold yellow]")
+        for alert in alerts:
+            level_color = "red" if alert.level.value >= 2 else "yellow"
+            console.print(f"  [{level_color}]{alert.level.name}[/{level_color}]: {alert.message}")
 
 
 @app.command()
