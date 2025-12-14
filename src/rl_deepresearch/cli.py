@@ -193,8 +193,7 @@ def train(
     tracker, rl_callbacks = create_rl_logging_stack(
         log_dir=log_dir,
         use_wandb=use_wandb,
-        wandb_project=wandb_project if use_wandb else None,
-        wandb_config=config.model_dump() if use_wandb else None,
+        wandb_project=wandb_project,
     )
 
     callbacks = rl_callbacks + [
