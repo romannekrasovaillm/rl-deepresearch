@@ -160,7 +160,12 @@ class HFModelWrapper(BaseModelWrapper):
             return_tensors="pt",
             truncation=True,
             max_length=self.config.max_context_length - max_new_tokens,
+            return_token_type_ids=False,
         ).to(self.model.device)
+
+        # Remove token_type_ids if present (some models don't support it)
+        if "token_type_ids" in inputs:
+            del inputs["token_type_ids"]
 
         with torch.no_grad():
             outputs = self.model.generate(
@@ -217,7 +222,12 @@ class HFModelWrapper(BaseModelWrapper):
             truncation=True,
             padding=True,
             max_length=self.config.max_context_length - max_new_tokens,
+            return_token_type_ids=False,
         ).to(self.model.device)
+
+        # Remove token_type_ids if present (some models don't support it)
+        if "token_type_ids" in inputs:
+            del inputs["token_type_ids"]
 
         with torch.no_grad():
             outputs = self.model.generate(
@@ -252,9 +262,14 @@ class HFModelWrapper(BaseModelWrapper):
             return_tensors="pt",
             truncation=True,
             max_length=self.config.max_context_length,
+            return_token_type_ids=False,
         ).to(self.model.device)
 
-        prompt_inputs = self.tokenizer(prompt, return_tensors="pt")
+        # Remove token_type_ids if present (some models don't support it)
+        if "token_type_ids" in inputs:
+            del inputs["token_type_ids"]
+
+        prompt_inputs = self.tokenizer(prompt, return_tensors="pt", return_token_type_ids=False)
         prompt_len = prompt_inputs["input_ids"].shape[1]
 
         with torch.no_grad():
@@ -297,9 +312,14 @@ class HFModelWrapper(BaseModelWrapper):
             full_text,
             return_tensors="pt",
             truncation=True,
+            return_token_type_ids=False,
         ).to(self.model.device)
 
-        prompt_len = self.tokenizer(prompt, return_tensors="pt")["input_ids"].shape[1]
+        # Remove token_type_ids if present (some models don't support it)
+        if "token_type_ids" in inputs:
+            del inputs["token_type_ids"]
+
+        prompt_len = self.tokenizer(prompt, return_tensors="pt", return_token_type_ids=False)["input_ids"].shape[1]
 
         with torch.no_grad():
             policy_outputs = self.model(**inputs)
