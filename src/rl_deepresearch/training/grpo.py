@@ -9,6 +9,7 @@ Key insights implemented:
 - Efficiency bonuses for emergent stopping
 """
 
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -23,6 +24,8 @@ from ..config import ExperimentConfig, GRPOConfig
 from ..models.base import BaseModelWrapper
 from ..rewards.compute import RewardComputer, Trajectory, TrajectoryStep
 from ..environment.base import ResearchEnvironment
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -134,14 +137,28 @@ class GRPOTrainer:
 
         self.model.prepare_for_inference()
 
-        for question_data in questions:
+        # Track cumulative stats for logging
+        if not hasattr(self, "_rollout_stats"):
+            self._rollout_stats = {
+                "total_rollouts": 0,
+                "total_reward": 0.0,
+                "correct_count": 0,
+                "dont_know_count": 0,
+                "error_count": 0,
+            }
+
+        for q_idx, question_data in enumerate(questions):
             question = question_data["question"]
             reference_answer = question_data.get("answer")
             reference_sources = question_data.get("sources", [])
 
+            # Log question start
+            q_short = question[:60] + "..." if len(question) > 60 else question
+            logger.info(f"[Q{q_idx+1}/{len(questions)}] {q_short}")
+
             group_trajectories = []
 
-            for _ in range(group_size):
+            for traj_idx in range(group_size):
                 # Reset environment
                 state = self.environment.reset(
                     question=question,
@@ -152,6 +169,7 @@ class GRPOTrainer:
                 trajectory_steps = []
                 total_searches = 0
                 total_reads = 0
+                step_rewards = []
 
                 # Run episode
                 while not state.is_done:
@@ -172,15 +190,19 @@ class GRPOTrainer:
                     result = self.environment.step(output.text)
 
                     # Track action type
-                    if "search" in result.info.get("tool_name", ""):
+                    tool_name = result.info.get("tool_name", "unknown")
+                    if "search" in tool_name:
                         total_searches += 1
-                    elif "read" in result.info.get("tool_name", ""):
+                    elif "read" in tool_name:
                         total_reads += 1
+
+                    # Track step reward
+                    step_rewards.append(result.reward)
 
                     # Record step
                     step = TrajectoryStep(
                         turn_index=state.turn,
-                        action_type=result.info.get("tool_name", "unknown"),
+                        action_type=tool_name,
                         action_content=output.text,
                         action_parsed=result.info.get("metadata", {}),
                         observation=result.observation,
@@ -207,6 +229,34 @@ class GRPOTrainer:
                     total_reads=total_reads,
                 )
                 group_trajectories.append(trajectory)
+
+                # Update cumulative stats
+                self._rollout_stats["total_rollouts"] += 1
+                step_reward_sum = sum(step_rewards)
+                self._rollout_stats["total_reward"] += step_reward_sum
+
+                # Determine outcome
+                outcome = "?"
+                if traj_data["final_answer"]:
+                    outcome = "ANS"
+                    if state.is_dont_know:
+                        outcome = "IDK"
+                        self._rollout_stats["dont_know_count"] += 1
+                elif any(r < -1 for r in step_rewards):
+                    outcome = "ERR"
+                    self._rollout_stats["error_count"] += 1
+
+                # Log rollout completion
+                cumulative_avg = self._rollout_stats["total_reward"] / self._rollout_stats["total_rollouts"]
+                logger.info(
+                    f"  [{traj_idx+1}/{group_size}] "
+                    f"steps={len(trajectory_steps):2d} "
+                    f"S={total_searches} R={total_reads} "
+                    f"reward={step_reward_sum:+.2f} "
+                    f"[{outcome}] "
+                    f"| cumul: {self._rollout_stats['total_rollouts']} rollouts, "
+                    f"avg_r={cumulative_avg:.3f}"
+                )
 
             all_trajectories.append(group_trajectories)
 
@@ -565,6 +615,15 @@ class GRPOTrainer:
         self.epoch += 1
         epoch_metrics = []
 
+        # Track batch filtering stats
+        batch_stats = {
+            "total": 0,
+            "skipped_no_variance": 0,
+            "skipped_all_max": 0,
+            "skipped_all_zero": 0,
+            "trained": 0,
+        }
+
         # Call epoch start callbacks
         if callbacks:
             for callback in callbacks:
@@ -572,6 +631,11 @@ class GRPOTrainer:
                     callback.on_epoch_start(self)
 
         for batch_idx, batch_data in enumerate(dataloader):
+            batch_stats["total"] += 1
+
+            logger.info(f"\n{'='*60}")
+            logger.info(f"[Batch {batch_idx+1}] Starting rollout generation...")
+
             # Generate rollouts
             trajectories = self.generate_rollouts(
                 batch_data,
@@ -583,9 +647,42 @@ class GRPOTrainer:
                 trajectories
             )
 
+            # Check rewards for filtering
+            all_rewards = []
+            for group_advs in advantages:
+                all_rewards.extend(group_advs)
+
+            if all_rewards:
+                reward_min = min(all_rewards)
+                reward_max = max(all_rewards)
+                reward_std = (sum((r - sum(all_rewards)/len(all_rewards))**2 for r in all_rewards) / len(all_rewards)) ** 0.5
+
+                logger.info(
+                    f"[Batch {batch_idx+1}] Rewards: "
+                    f"min={reward_min:.3f} max={reward_max:.3f} std={reward_std:.3f} "
+                    f"groups_with_var={reward_metrics['num_groups_with_variance']}"
+                )
+
             # Skip if no variance (GRPO needs variance)
             if reward_metrics["num_groups_with_variance"] == 0:
+                # Determine why no variance
+                if all_rewards:
+                    avg_reward = sum(all_rewards) / len(all_rewards)
+                    if avg_reward > 1.5:  # High reward threshold
+                        batch_stats["skipped_all_max"] += 1
+                        logger.warning(f"[Batch {batch_idx+1}] SKIPPED: All trajectories got high reward (avg={avg_reward:.2f})")
+                    elif abs(avg_reward) < 0.1:  # Near zero
+                        batch_stats["skipped_all_zero"] += 1
+                        logger.warning(f"[Batch {batch_idx+1}] SKIPPED: All trajectories got ~zero reward (avg={avg_reward:.2f})")
+                    else:
+                        batch_stats["skipped_no_variance"] += 1
+                        logger.warning(f"[Batch {batch_idx+1}] SKIPPED: No variance in group (avg={avg_reward:.2f})")
+                else:
+                    batch_stats["skipped_no_variance"] += 1
+                    logger.warning(f"[Batch {batch_idx+1}] SKIPPED: No rewards computed")
                 continue
+
+            batch_stats["trained"] += 1
 
             # Prepare batch
             batch = self.prepare_batch(trajectories, advantages, turn_advantages)
@@ -593,6 +690,15 @@ class GRPOTrainer:
             # Train step
             step_metrics = self.train_step(batch)
             step_metrics.update(reward_metrics)
+
+            # Log training step
+            logger.info(
+                f"[Batch {batch_idx+1}] TRAINED: "
+                f"loss={step_metrics.get('total_loss', 0):.4f} "
+                f"pg_loss={step_metrics.get('pg_loss', 0):.4f} "
+                f"kl_loss={step_metrics.get('kl_loss', 0):.4f} "
+                f"entropy={step_metrics.get('entropy', 0):.4f}"
+            )
 
             epoch_metrics.append(step_metrics)
 
@@ -611,6 +717,15 @@ class GRPOTrainer:
                 if should_stop:
                     break
 
+        # Log epoch batch stats
+        logger.info(f"\n{'='*60}")
+        logger.info(f"[Epoch {self.epoch}] SUMMARY:")
+        logger.info(f"  Total batches:       {batch_stats['total']}")
+        logger.info(f"  Trained batches:     {batch_stats['trained']}")
+        logger.info(f"  Skipped (no var):    {batch_stats['skipped_no_variance']}")
+        logger.info(f"  Skipped (all max):   {batch_stats['skipped_all_max']}")
+        logger.info(f"  Skipped (all zero):  {batch_stats['skipped_all_zero']}")
+
         # Aggregate epoch metrics
         if epoch_metrics:
             agg_metrics = {
@@ -621,6 +736,18 @@ class GRPOTrainer:
             agg_metrics["epoch"] = self.epoch
             agg_metrics["steps_in_epoch"] = len(epoch_metrics)
 
+            # Add batch filtering stats
+            agg_metrics["batches_total"] = batch_stats["total"]
+            agg_metrics["batches_trained"] = batch_stats["trained"]
+            agg_metrics["batches_skipped_no_var"] = batch_stats["skipped_no_variance"]
+            agg_metrics["batches_skipped_all_max"] = batch_stats["skipped_all_max"]
+            agg_metrics["batches_skipped_all_zero"] = batch_stats["skipped_all_zero"]
+
+            logger.info(f"  Mean reward:         {agg_metrics.get('mean_reward', 0):.4f}")
+            logger.info(f"  Correct rate:        {agg_metrics.get('correct_rate', 0):.2%}")
+            logger.info(f"  Mean loss:           {agg_metrics.get('total_loss', 0):.4f}")
+            logger.info(f"{'='*60}\n")
+
             # Call epoch end callbacks
             if callbacks:
                 for callback in callbacks:
@@ -629,7 +756,9 @@ class GRPOTrainer:
 
             return agg_metrics
 
-        return {"epoch": self.epoch, "steps_in_epoch": 0}
+        logger.info(f"  No batches trained this epoch!")
+        logger.info(f"{'='*60}\n")
+        return {"epoch": self.epoch, "steps_in_epoch": 0, **batch_stats}
 
     def train(
         self,
