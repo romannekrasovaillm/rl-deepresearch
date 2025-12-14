@@ -247,6 +247,10 @@ class GigaChatLocalWrapper(BaseModelWrapper):
             return_token_type_ids=False,
         ).to(self.device)
 
+        # Remove token_type_ids if present (some models don't support it)
+        if "token_type_ids" in inputs:
+            del inputs["token_type_ids"]
+
         with torch.no_grad():
             outputs = self.model.generate(
                 **inputs,
@@ -312,6 +316,10 @@ class GigaChatLocalWrapper(BaseModelWrapper):
             return_token_type_ids=False,
         ).to(self.device)
 
+        # Remove token_type_ids if present (some models don't support it)
+        if "token_type_ids" in inputs:
+            del inputs["token_type_ids"]
+
         with torch.no_grad():
             outputs = self.model.generate(
                 **inputs,
@@ -360,6 +368,10 @@ class GigaChatLocalWrapper(BaseModelWrapper):
             max_length=self.config.max_context_length,
             return_token_type_ids=False,
         ).to(self.device)
+
+        # Remove token_type_ids if present (some models don't support it)
+        if "token_type_ids" in inputs:
+            del inputs["token_type_ids"]
 
         prompt_inputs = self.tokenizer(
             prompt,

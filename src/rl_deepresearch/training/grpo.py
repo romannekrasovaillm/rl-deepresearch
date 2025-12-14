@@ -318,7 +318,12 @@ class GRPOTrainer:
                 truncation=True,
                 max_length=self.config.model.max_context_length,
                 padding="max_length",
+                return_token_type_ids=False,
             )
+
+            # Remove token_type_ids if present (some models don't support it)
+            if "token_type_ids" in encoded:
+                del encoded["token_type_ids"]
 
             all_input_ids.append(encoded["input_ids"][0])
             all_attention_masks.append(encoded["attention_mask"][0])
@@ -385,9 +390,9 @@ class GRPOTrainer:
                 if action_start >= 0:
                     # Approximate token position
                     prefix = full_text[:action_start]
-                    prefix_tokens = tokenizer(prefix, return_tensors="pt")["input_ids"].shape[1]
+                    prefix_tokens = tokenizer(prefix, return_tensors="pt", return_token_type_ids=False)["input_ids"].shape[1]
 
-                    action_tokens = tokenizer(step.action_content, return_tensors="pt")["input_ids"].shape[1]
+                    action_tokens = tokenizer(step.action_content, return_tensors="pt", return_token_type_ids=False)["input_ids"].shape[1]
 
                     # Set mask for action tokens
                     end_pos = min(prefix_tokens + action_tokens, len(mask))
