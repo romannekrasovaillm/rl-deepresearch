@@ -244,10 +244,8 @@ class GigaChatLocalWrapper(BaseModelWrapper):
             return_tensors="pt",
             truncation=True,
             max_length=self.config.max_context_length - max_new_tokens,
+            return_token_type_ids=False,
         ).to(self.device)
-
-        # Filter out unsupported kwargs (e.g., token_type_ids for DeepseekV3)
-        inputs = self._filter_model_inputs(inputs)
 
         with torch.no_grad():
             outputs = self.model.generate(
@@ -311,10 +309,8 @@ class GigaChatLocalWrapper(BaseModelWrapper):
             truncation=True,
             padding=True,
             max_length=self.config.max_context_length - max_new_tokens,
+            return_token_type_ids=False,
         ).to(self.device)
-
-        # Filter out unsupported kwargs (e.g., token_type_ids for DeepseekV3)
-        inputs = self._filter_model_inputs(inputs)
 
         with torch.no_grad():
             outputs = self.model.generate(
@@ -362,15 +358,14 @@ class GigaChatLocalWrapper(BaseModelWrapper):
             return_tensors="pt",
             truncation=True,
             max_length=self.config.max_context_length,
+            return_token_type_ids=False,
         ).to(self.device)
-
-        # Filter out unsupported kwargs (e.g., token_type_ids for DeepseekV3)
-        inputs = self._filter_model_inputs(inputs)
 
         prompt_inputs = self.tokenizer(
             prompt,
             return_tensors="pt",
             truncation=True,
+            return_token_type_ids=False,
         )
         prompt_length = prompt_inputs["input_ids"].shape[1]
 
@@ -478,23 +473,6 @@ class GigaChatLocalWrapper(BaseModelWrapper):
     @property
     def hidden_size(self) -> int:
         return self.model.config.hidden_size
-
-    def _filter_model_inputs(self, inputs) -> dict:
-        """
-        Remove tokenizer outputs not supported by the model.
-
-        Some models (e.g., DeepseekV3) don't accept token_type_ids
-        even though the tokenizer returns them.
-        """
-        # Keys that some models don't support
-        unsupported_keys = {"token_type_ids"}
-
-        # Handle BatchEncoding by deleting unsupported keys in-place
-        for key in unsupported_keys:
-            if key in inputs:
-                del inputs[key]
-
-        return inputs
 
 
 def create_model_wrapper(
