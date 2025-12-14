@@ -479,7 +479,7 @@ class GigaChatLocalWrapper(BaseModelWrapper):
     def hidden_size(self) -> int:
         return self.model.config.hidden_size
 
-    def _filter_model_inputs(self, inputs: dict) -> dict:
+    def _filter_model_inputs(self, inputs) -> dict:
         """
         Remove tokenizer outputs not supported by the model.
 
@@ -488,7 +488,13 @@ class GigaChatLocalWrapper(BaseModelWrapper):
         """
         # Keys that some models don't support
         unsupported_keys = {"token_type_ids"}
-        return {k: v for k, v in inputs.items() if k not in unsupported_keys}
+
+        # Handle BatchEncoding by deleting unsupported keys in-place
+        for key in unsupported_keys:
+            if key in inputs:
+                del inputs[key]
+
+        return inputs
 
 
 def create_model_wrapper(
