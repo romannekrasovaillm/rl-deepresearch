@@ -246,6 +246,9 @@ class GigaChatLocalWrapper(BaseModelWrapper):
             max_length=self.config.max_context_length - max_new_tokens,
         ).to(self.device)
 
+        # Filter out unsupported kwargs (e.g., token_type_ids for DeepseekV3)
+        inputs = self._filter_model_inputs(inputs)
+
         with torch.no_grad():
             outputs = self.model.generate(
                 **inputs,
@@ -310,6 +313,9 @@ class GigaChatLocalWrapper(BaseModelWrapper):
             max_length=self.config.max_context_length - max_new_tokens,
         ).to(self.device)
 
+        # Filter out unsupported kwargs (e.g., token_type_ids for DeepseekV3)
+        inputs = self._filter_model_inputs(inputs)
+
         with torch.no_grad():
             outputs = self.model.generate(
                 **inputs,
@@ -357,6 +363,9 @@ class GigaChatLocalWrapper(BaseModelWrapper):
             truncation=True,
             max_length=self.config.max_context_length,
         ).to(self.device)
+
+        # Filter out unsupported kwargs (e.g., token_type_ids for DeepseekV3)
+        inputs = self._filter_model_inputs(inputs)
 
         prompt_inputs = self.tokenizer(
             prompt,
@@ -469,6 +478,17 @@ class GigaChatLocalWrapper(BaseModelWrapper):
     @property
     def hidden_size(self) -> int:
         return self.model.config.hidden_size
+
+    def _filter_model_inputs(self, inputs: dict) -> dict:
+        """
+        Remove tokenizer outputs not supported by the model.
+
+        Some models (e.g., DeepseekV3) don't accept token_type_ids
+        even though the tokenizer returns them.
+        """
+        # Keys that some models don't support
+        unsupported_keys = {"token_type_ids"}
+        return {k: v for k, v in inputs.items() if k not in unsupported_keys}
 
 
 def create_model_wrapper(
