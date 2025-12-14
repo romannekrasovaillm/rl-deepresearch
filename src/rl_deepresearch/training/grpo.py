@@ -275,6 +275,16 @@ class GRPOTrainer:
             metrics["correct_rate"] = correct_count / total_count
             metrics["dont_know_rate"] = dont_know_count / total_count
 
+        # Additional reward statistics for monitoring
+        if total_rewards:
+            metrics["reward_std"] = (
+                (sum((r - metrics["mean_reward"]) ** 2 for r in total_rewards) / len(total_rewards)) ** 0.5
+                if len(total_rewards) > 1 else 0.0
+            )
+            metrics["reward_min"] = min(total_rewards)
+            metrics["reward_max"] = max(total_rewards)
+            metrics["reward_range"] = metrics["reward_max"] - metrics["reward_min"]
+
         return all_advantages, all_turn_advantages, metrics
 
     def prepare_batch(
@@ -468,18 +478,36 @@ class GRPOTrainer:
 
         # Entropy bonus
         entropy = -(log_probs.exp() * log_probs).sum(dim=-1)
-        entropy_loss = -self.grpo_config.entropy_coef * (entropy * shift_mask).mean()
+        masked_entropy = (entropy * shift_mask).sum(dim=-1) / (shift_mask.sum(dim=-1) + 1e-8)
+        mean_entropy = masked_entropy.mean()
+        entropy_loss = -self.grpo_config.entropy_coef * mean_entropy
 
         # Total loss
         total_loss = pg_loss + kl_loss + entropy_loss
 
+        # Compute additional metrics for monitoring
+        advantage_std = advantages.std().item() if len(advantages) > 1 else 0.0
+
         metrics = {
+            # Core losses
             "pg_loss": pg_loss.item(),
             "kl_loss": kl_loss.item(),
             "entropy_loss": entropy_loss.item(),
             "total_loss": total_loss.item(),
+            # Policy metrics
             "mean_log_prob": seq_log_probs.mean().item(),
+            "log_prob_std": seq_log_probs.std().item() if len(seq_log_probs) > 1 else 0.0,
+            # Advantage metrics
             "mean_advantage": advantages.mean().item(),
+            "advantage_std": advantage_std,
+            "advantage_max": advantages.max().item(),
+            "advantage_min": advantages.min().item(),
+            # Entropy metrics (critical for exploration)
+            "entropy": mean_entropy.item(),
+            "entropy_min": masked_entropy.min().item(),
+            "entropy_max": masked_entropy.max().item(),
+            # Action mask stats
+            "action_mask_ratio": shift_mask.float().mean().item(),
         }
 
         return total_loss, metrics
@@ -492,12 +520,32 @@ class GRPOTrainer:
 
         loss.backward()
 
+        # Compute gradient statistics before clipping
+        trainable_params = self.model.get_trainable_parameters()
+        grad_norms = []
+        grad_maxs = []
+        for p in trainable_params:
+            if p.grad is not None:
+                grad_norms.append(p.grad.norm().item())
+                grad_maxs.append(p.grad.abs().max().item())
+
+        if grad_norms:
+            metrics["grad_norm_pre_clip"] = sum(grad_norms) / len(grad_norms)
+            metrics["grad_max"] = max(grad_maxs)
+
         # Gradient clipping
         grad_norm = nn.utils.clip_grad_norm_(
-            self.model.get_trainable_parameters(),
+            trainable_params,
             self.grpo_config.max_grad_norm,
         )
         metrics["grad_norm"] = grad_norm.item()
+
+        # Check for NaN/Inf gradients
+        has_nan = any(
+            p.grad is not None and (torch.isnan(p.grad).any() or torch.isinf(p.grad).any())
+            for p in trainable_params
+        )
+        metrics["grad_has_nan_inf"] = float(has_nan)
 
         self.optimizer.step()
         self.scheduler.step()
@@ -511,11 +559,17 @@ class GRPOTrainer:
     def train_epoch(
         self,
         dataloader: DataLoader,
-        callbacks: list[Callable] | None = None,
+        callbacks: list | None = None,
     ) -> dict:
         """Train for one epoch."""
         self.epoch += 1
         epoch_metrics = []
+
+        # Call epoch start callbacks
+        if callbacks:
+            for callback in callbacks:
+                if hasattr(callback, "on_epoch_start"):
+                    callback.on_epoch_start(self)
 
         for batch_idx, batch_data in enumerate(dataloader):
             # Generate rollouts
@@ -542,21 +596,40 @@ class GRPOTrainer:
 
             epoch_metrics.append(step_metrics)
 
-            # Callbacks
+            # Callbacks - support both function and object callbacks
             if callbacks:
+                should_stop = False
                 for callback in callbacks:
-                    callback(self, step_metrics)
+                    if hasattr(callback, "on_step"):
+                        callback.on_step(self, step_metrics)
+                        # Check for early stopping
+                        if hasattr(callback, "should_stop") and callback.should_stop:
+                            should_stop = True
+                    elif callable(callback):
+                        callback(self, step_metrics)
+
+                if should_stop:
+                    break
 
         # Aggregate epoch metrics
         if epoch_metrics:
             agg_metrics = {
                 k: sum(m[k] for m in epoch_metrics) / len(epoch_metrics)
                 for k in epoch_metrics[0].keys()
+                if isinstance(epoch_metrics[0].get(k), (int, float))
             }
             agg_metrics["epoch"] = self.epoch
+            agg_metrics["steps_in_epoch"] = len(epoch_metrics)
+
+            # Call epoch end callbacks
+            if callbacks:
+                for callback in callbacks:
+                    if hasattr(callback, "on_epoch_end"):
+                        callback.on_epoch_end(self, agg_metrics)
+
             return agg_metrics
 
-        return {"epoch": self.epoch}
+        return {"epoch": self.epoch, "steps_in_epoch": 0}
 
     def train(
         self,
@@ -564,7 +637,7 @@ class GRPOTrainer:
         num_epochs: int | None = None,
         max_steps: int | None = None,
         eval_dataloader: DataLoader | None = None,
-        callbacks: list[Callable] | None = None,
+        callbacks: list | None = None,
     ) -> dict:
         """Full training loop."""
         num_epochs = num_epochs or self.config.training.num_epochs
@@ -573,9 +646,26 @@ class GRPOTrainer:
         all_metrics = []
         start_time = time.time()
 
+        # Call train start callbacks
+        if callbacks:
+            for callback in callbacks:
+                if hasattr(callback, "on_train_start"):
+                    callback.on_train_start(self)
+
+        should_stop = False
         for epoch in range(num_epochs):
             epoch_metrics = self.train_epoch(train_dataloader, callbacks)
             all_metrics.append(epoch_metrics)
+
+            # Check for early stopping from callbacks
+            if callbacks:
+                for callback in callbacks:
+                    if hasattr(callback, "should_stop") and callback.should_stop:
+                        should_stop = True
+                        break
+
+            if should_stop:
+                break
 
             # Evaluation
             if eval_dataloader and (epoch + 1) % 1 == 0:
@@ -595,13 +685,21 @@ class GRPOTrainer:
 
         total_time = time.time() - start_time
 
-        return {
+        final_result = {
             "epochs": len(all_metrics),
             "total_steps": self.global_step,
             "total_time": total_time,
             "best_reward": self.best_reward,
             "final_metrics": all_metrics[-1] if all_metrics else {},
         }
+
+        # Call train end callbacks
+        if callbacks:
+            for callback in callbacks:
+                if hasattr(callback, "on_train_end"):
+                    callback.on_train_end(self, final_result)
+
+        return final_result
 
     def evaluate(self, dataloader: DataLoader) -> dict:
         """Evaluate on dataset."""
