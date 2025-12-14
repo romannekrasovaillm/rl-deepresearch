@@ -102,8 +102,8 @@ data/
 !configs/*.yaml
 !configs/*.json
 
-# Model files
-models/
+# Model files (downloaded/cached models, not source code)
+/models/
 *.gguf
 *.ggml
 
