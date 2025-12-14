@@ -30,9 +30,9 @@ def train(
         help="Path to config YAML file"
     ),
     model_name: str = typer.Option(
-        "ai-forever/gigachat-lightning",
+        "ai-sage/GigaChat3-10B-A1.8B-base",
         "--model", "-m",
-        help="Model name or path"
+        help="Model name or path (default: GigaChat3-10B MoE)"
     ),
     dataset: str = typer.Option(
         "hotpotqa",
@@ -93,8 +93,11 @@ def train(
     """
     Train research agent with GRPO.
 
+    Default model: ai-sage/GigaChat3-10B-A1.8B-base (MoE: 10B total, 1.8B active)
+
     Example:
-        rl-research train --model ai-forever/gigachat-lightning --epochs 3
+        rl-research train --epochs 3
+        rl-research train --config configs/gigachat_b200.yaml
     """
     import torch
     from .config import ExperimentConfig, ModelConfig, GRPOConfig, TrainingConfig
@@ -347,9 +350,9 @@ def serve(
         help="Path to model checkpoint"
     ),
     model_name: str = typer.Option(
-        "ai-forever/gigachat-lightning",
+        "ai-sage/GigaChat3-10B-A1.8B-base",
         "--model", "-m",
-        help="Model name (if no checkpoint)"
+        help="Model name (default: GigaChat3-10B MoE)"
     ),
     verbose: bool = typer.Option(
         False,

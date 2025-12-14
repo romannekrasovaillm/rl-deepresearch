@@ -1,6 +1,14 @@
 # RL Deep Research
 
-Reinforcement Learning framework for training Deep Research Agents using GRPO (Group Relative Policy Optimization) on GigaChat-Lightning, optimized for NVIDIA B200 GPUs.
+Reinforcement Learning framework for training Deep Research Agents using GRPO (Group Relative Policy Optimization) on **GigaChat3-10B-A1.8B-base**, optimized for NVIDIA B200 GPUs.
+
+## Model
+
+**Default**: [ai-sage/GigaChat3-10B-A1.8B-base](https://huggingface.co/ai-sage/GigaChat3-10B-A1.8B-base)
+- **Architecture**: Mixture of Experts (MoE)
+- **Total Parameters**: 10B
+- **Active Parameters**: 1.8B per forward pass
+- **Efficiency**: High throughput with low memory footprint
 
 ## Key Features
 
@@ -55,14 +63,17 @@ pip install flash-attn --no-build-isolation
 ### Training
 
 ```bash
-# Basic training
-rl-research train --model ai-forever/gigachat-lightning --epochs 3
+# Basic training (uses GigaChat3-10B-A1.8B-base by default)
+rl-research train --epochs 3
 
 # With config file (recommended for B200)
 rl-research train --config configs/gigachat_b200.yaml
 
 # Quick test
 python scripts/run_experiment.py --debug --epochs 1
+
+# Explicit model specification
+rl-research train --model ai-sage/GigaChat3-10B-A1.8B-base --epochs 3
 ```
 
 ### Evaluation
@@ -100,9 +111,9 @@ rl-deepresearch/
 Key configuration options (see `configs/gigachat_b200.yaml`):
 
 ```yaml
-# Model
+# Model - GigaChat3-10B MoE (10B total, 1.8B active)
 model:
-  model_name: "ai-forever/gigachat-lightning"
+  model_name: "ai-sage/GigaChat3-10B-A1.8B-base"
   dtype: "bf16"
   use_lora: true
   lora_r: 64

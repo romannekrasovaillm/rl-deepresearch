@@ -6,8 +6,10 @@ seed: 42
 debug: false
 
 # Model configuration - B200 optimized
+# Using GigaChat3-10B-A1.8B-base (MoE architecture, 10B total / 1.8B active params)
+# https://huggingface.co/ai-sage/GigaChat3-10B-A1.8B-base
 model:
-  model_name: "ai-forever/gigachat-lightning"
+  model_name: "ai-sage/GigaChat3-10B-A1.8B-base"
   dtype: "bf16"  # BF16 optimal for B200
 
   # LoRA for efficient fine-tuning

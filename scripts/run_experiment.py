@@ -2,9 +2,13 @@
 """
 Quick experiment runner for RL Deep Research.
 
+Default model: ai-sage/GigaChat3-10B-A1.8B-base (MoE: 10B total, 1.8B active)
+https://huggingface.co/ai-sage/GigaChat3-10B-A1.8B-base
+
 Usage:
-    python scripts/run_experiment.py --model ai-forever/gigachat-lightning
+    python scripts/run_experiment.py
     python scripts/run_experiment.py --config configs/gigachat_b200.yaml
+    python scripts/run_experiment.py --model ai-sage/GigaChat3-10B-A1.8B-base --epochs 3
 """
 
 import argparse
@@ -27,8 +31,8 @@ def main():
     parser.add_argument(
         "--model", "-m",
         type=str,
-        default="ai-forever/gigachat-lightning",
-        help="Model name or path"
+        default="ai-sage/GigaChat3-10B-A1.8B-base",
+        help="Model name or path (default: GigaChat3-10B MoE)"
     )
     parser.add_argument(
         "--output", "-o",

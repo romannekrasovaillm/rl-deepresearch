@@ -114,7 +114,11 @@ class GRPOConfig(BaseModel):
 
 class ModelConfig(BaseModel):
     """
-    Model configuration for GigaChat-Lightning with B200 optimization.
+    Model configuration for GigaChat3 with B200 optimization.
+
+    Default model: ai-sage/GigaChat3-10B-A1.8B-base
+    - MoE architecture: 10B total parameters, 1.8B active per forward pass
+    - https://huggingface.co/ai-sage/GigaChat3-10B-A1.8B-base
 
     Key insights:
     - LoRA as implicit regularization (limits capacity to overfit)
@@ -123,7 +127,8 @@ class ModelConfig(BaseModel):
     """
 
     # Model selection
-    model_name: str = Field(default="ai-forever/gigachat-lightning", description="Base model name/path")
+    # GigaChat3-10B-A1.8B-base: MoE with 10B total / 1.8B active params
+    model_name: str = Field(default="ai-sage/GigaChat3-10B-A1.8B-base", description="Base model name/path")
     tokenizer_name: str | None = Field(default=None, description="Tokenizer (defaults to model_name)")
 
     # Precision for B200
