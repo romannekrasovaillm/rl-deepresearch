@@ -169,7 +169,6 @@ class GRPOTrainer:
                 trajectory_steps = []
                 total_searches = 0
                 total_reads = 0
-                step_rewards = []
 
                 # Run episode
                 while not state.is_done:
@@ -195,9 +194,6 @@ class GRPOTrainer:
                         total_searches += 1
                     elif "read" in tool_name:
                         total_reads += 1
-
-                    # Track step reward
-                    step_rewards.append(result.reward)
 
                     # Record step
                     step = TrajectoryStep(
@@ -232,30 +228,12 @@ class GRPOTrainer:
 
                 # Update cumulative stats
                 self._rollout_stats["total_rollouts"] += 1
-                step_reward_sum = sum(step_rewards)
-                self._rollout_stats["total_reward"] += step_reward_sum
 
-                # Determine outcome
-                outcome = "?"
-                if traj_data["final_answer"]:
-                    outcome = "ANS"
-                    if state.is_dont_know:
-                        outcome = "IDK"
-                        self._rollout_stats["dont_know_count"] += 1
-                elif any(r < -1 for r in step_rewards):
-                    outcome = "ERR"
-                    self._rollout_stats["error_count"] += 1
-
-                # Log rollout completion
-                cumulative_avg = self._rollout_stats["total_reward"] / self._rollout_stats["total_rollouts"]
+                # Brief progress log (detailed logs come after reward computation)
                 logger.info(
-                    f"  [{traj_idx+1}/{group_size}] "
-                    f"steps={len(trajectory_steps):2d} "
-                    f"S={total_searches} R={total_reads} "
-                    f"reward={step_reward_sum:+.2f} "
-                    f"[{outcome}] "
-                    f"| cumul: {self._rollout_stats['total_rollouts']} rollouts, "
-                    f"avg_r={cumulative_avg:.3f}"
+                    f"    Traj {traj_idx+1}/{group_size} done: "
+                    f"{len(trajectory_steps)} steps, "
+                    f"S={total_searches} R={total_reads}"
                 )
 
             all_trajectories.append(group_trajectories)
@@ -265,6 +243,7 @@ class GRPOTrainer:
     def compute_group_advantages(
         self,
         trajectories: list[list[Trajectory]],
+        log_details: bool = True,
     ) -> tuple[list[list[float]], list[list[list[float]]], dict]:
         """
         Compute group-relative advantages.
@@ -287,9 +266,74 @@ class GRPOTrainer:
         dont_know_count = 0
         total_count = 0
 
-        for group in trajectories:
+        for q_idx, group in enumerate(trajectories):
             # Compute rewards for group
             group_result = self.reward_computer.compute_group_rewards(group)
+
+            if log_details:
+                q_short = group[0].question[:50] + "..." if len(group[0].question) > 50 else group[0].question
+                logger.info(f"\n[Question {q_idx+1}] {q_short}")
+                logger.info(f"  Reference: {group[0].reference_answer}")
+
+            # Log each trajectory in group
+            for traj_idx, (traj, reward_info) in enumerate(zip(group, group_result["individual_rewards"])):
+                traj_reward = reward_info["total_reward"]
+                advantage = group_result["normalized_advantages"][traj_idx]
+
+                if log_details:
+                    # Build action sequence string
+                    actions = []
+                    for step in traj.steps:
+                        action_type = step.action_type
+                        if action_type == "semantic_search":
+                            query = step.action_parsed.get("query", "?")[:30]
+                            actions.append(f"S({query})")
+                        elif action_type == "keyword_search":
+                            query = step.action_parsed.get("query", "?")[:30]
+                            actions.append(f"K({query})")
+                        elif action_type == "read_document":
+                            doc_id = step.action_parsed.get("doc_id", "?")[:8]
+                            actions.append(f"R({doc_id})")
+                        elif action_type == "answer":
+                            ans = step.action_parsed.get("answer", "?")[:20]
+                            actions.append(f"ANS({ans})")
+                        elif action_type == "dont_know":
+                            actions.append("IDK")
+                        elif action_type == "unknown":
+                            actions.append("ERR")
+                        else:
+                            actions.append(action_type[:3].upper())
+
+                    action_str = " → ".join(actions) if actions else "(empty)"
+
+                    # Outcome marker
+                    outcome = "?"
+                    if reward_info["metadata"].get("is_correct"):
+                        outcome = "✓ CORRECT"
+                    elif reward_info["metadata"].get("is_dont_know"):
+                        outcome = "○ IDK"
+                    elif traj.final_answer:
+                        outcome = "✗ WRONG"
+                    else:
+                        outcome = "✗ ERR"
+
+                    # Reward breakdown
+                    breakdown = reward_info.get("component_breakdown", {})
+                    components = []
+                    for comp, val in breakdown.items():
+                        if val != 0:
+                            components.append(f"{comp}={val:+.1f}")
+                    comp_str = ", ".join(components) if components else "no components"
+
+                    logger.info(
+                        f"  [{traj_idx+1}/{len(group)}] {outcome} "
+                        f"reward={traj_reward:+.2f} adv={advantage:+.2f}"
+                    )
+                    logger.info(f"       Actions: {action_str}")
+                    if traj.final_answer:
+                        ans_short = traj.final_answer[:50] + "..." if len(traj.final_answer) > 50 else traj.final_answer
+                        logger.info(f"       Answer: {ans_short}")
+                    logger.info(f"       Rewards: {comp_str}")
 
             # Store normalized advantages
             all_advantages.append(group_result["normalized_advantages"])
